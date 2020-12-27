@@ -1,0 +1,13 @@
+The assignment specification skips over some important aspects of "real world" security. If I recall correctly, they've been discussed during the lectures, but I feel it's important to "get in the habit" of "doing things right". Granted, "doing things right" is usually taken to mean not working directly with cryptographic primitives and instead using -- something this assignment requires. I've added notes for all of those things in the "real world" folder. The primitives I picked out, along with how I describe their use, are the definitively-"correct" choices given our constraints. The longer-winded reasons are in the "real world" folder.
+
+Picking cryptographic primitives isn't enough to fully specify how the client and server communicate. My recommendations for the rest of that is in the "ABI" folder.
+
+All of the functions I have implemented use type hints and use isinstance checks to enforce the hints. I've encountered hard-to-debug issues when using duck-typing alone since there are no hard-and-fast restrictions on the exact behavior of anything. I would appreciate if these checks are continued going forward.
+
+Because of how we were required to make the public keys, private keys, and "certificates" (they're actually just signatures), the algorithms and formats used are fixed. The keys are in PEM format, and the signatures are stored "raw". The signatures are created using SHA256 hashing, PKCS1v15 padding, and 2048-bit RSA. Valid signatures are always 256 bytes, so the current code refuses to load signatures with different length. Wrong-length signatures likely mean that someone managed to make the calling code perform directory-traversal.
+
+Information on the handshakes for the client with the server and for the client with the recipient are in "server handshake" and "client handshake", respectively. They produce keys suitable for the long-term cipher.
+
+The long-term cipher should be ChaCha20-Poly130. The reasoning for this is explained in "real world/cipher notes".
+
+Note that each message is encrypted multiple times. The sender encrypts it once to ensure that only the recipient receives it and to ensure that the recipient can detect tampering. They then add the recipient's handle and encrypt it again to send it to the server and to ensure that the server can detect tampering and track who is sending. The server will decrypt the outer layer in order to determine the recipient and then re-encrypt to send it to the client. The client will decrypt the outer layer, verifying that the message came from the server, then decrypt the inner layer, verifying that the message originated with the appropriate sender.

@@ -1,0 +1,9 @@
+This is an overview -- exact message sequence is in the ABI folder.
+
+Since our ciphersuite is fixed, the handshake performs no ciphersuite-negotiation, removing and combining steps present in TLS.
+
+Clients aren't allowed persistent public/private key pairs, so they cannot authenticate each-other. They must instead rely on the server to authenticate the clients' messages during their key-exchange. From there, the encryption with the server is still needed to obscure sender and recipient -- the server needs to know the recipient's handle in order to direct the message to the correct client, and the recipient needs to know the sender's handle in order to determine which session keys to use.
+
+The X25519 key exchange is used to derive a "premaster" key. There is no way for the clients to authenticate each-other's ephemeral public keys. See "real world/key-exchange notes". The HKDF function is used to derive a "master" key from the "premaster" key and random data from both the client and server. Messages are one-way after the handshake, so the "master" key is used as the only key. Further messages are encrypted (using authenticated encryption) using those keys. Since the client derives the shared key last, the client must acknowledge the key exchange rather than the server. This can be implicit in the sender sending the message. The handshake is complete.
+
+The docs for HKDF suggest that the salt should be as long as the hash algorithm's output. This means that the sender and recipient random numbers together should be 256-bit or 32-byte. This means each individual number is 16 bytes.

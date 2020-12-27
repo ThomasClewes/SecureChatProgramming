@@ -1,0 +1,78 @@
+Note: PACKET refers to the variable in protocol.py. It provides labels for messages since TCP Segments aren't treated as individual messages.
+
+Note: size fields give sizes in bytes
+
+Client generates random number, ephemeral private key, and ephemeral public key.
+
+Client Hello:
+|Ephemeral Public Key   : 32 bytes, Raw/Raw|
+|Client Random Number   : 16 bytes, raw    |
+
+The tag given to LNP is PACKETS["CLIENT_HELLO"]
+
+Server generates random number, ephemeral private key, and ephemeral public key, then derives the premaster key using X25519. The 64-byte (not bit) master key is derived using HKDF with SHA256 on the premaster key, with the Client random number concatenated with the Server random number as the salt. The client session key is the first 32 bytes of the master key, and the server session key is the last 32 bytes.
+
+Server Hello:
+|Signature              : 256 bytes, raw                         |
+|Ephemeral Public Key   : 32 bytes,  raw                         |
+|Server Random Number   : 16 bytes,  raw                         |
+|Client Random Number   : 16 bytes,  raw                         |
+|Server public key Size : 4 bytes,   unsigned integer, big-endian|
+|Server public key      : variable,  DER/SubjectPublicKeyInfo    |
+
+The tag given to LNP is PACKETS["SERVER_HELLO"]
+
+Note: the IKE protocols shown in class send certificates after the shared key is created, encrypting the certificates. TLS sends the certificates before the shared key is created. We use the latter approach since it creates a simpler handshake in our scenario. However, the client's signature is only send after the shared key is created (and thus after the server is authenticated) since it is an authentication token (which should be kept secret). A user of a secure chat program would likely also want to not have their chat-identity visible to anyone but the server.
+
+The signature signs the whole rest of the message. The signature uses the server's RSA2048 key, SHA256 hashing, and PSS padding.
+
+Technically, the client random only needs to be in the signature and not in the message itself, but including it requires less byte-gymnastics.
+
+Similarly, the signature does not need to include the public key, but it again requires less byte-gymnastics.
+
+Client verifies the signature. If it is invalid, the client closes the connection. Whether it retries is not part of the handshake. If the signature is valid, the client derives the premaster key using X25519. The 64-byte (not bit) master key is derived using HKDF with SHA256 on the premaster key, with the Client random number concatenated with the Server random number as the salt. The client session key is the first 32 bytes of the master key, and the server session key is the last 32 bytes.
+
+Note: For the remainder of the handshake, and for future messages, the whole message is encrypted using ChaCha20-Poly1305. Messages sent by the client are encrypted with the client session key, and messages sent by the server are encrypted using the server session key. The format of an encrypted message is as follows:
+
+|Nonce          : 12 bytes, raw                         |
+|Ciphertext     : variable, raw                         |
+
+The tag given to and received from LNP is used as the "associated data" to the encryption algorithm so that an attacker cannot tamper with the tag.
+
+Given the size of the "length" field, the maximum allowed length for the ciphertext is 2^32-12. Due to the cryptographic algorithm used, the maximum allowed plaintext length is 2^32-28.
+
+The formats shown for remaining messages are the plaintext.
+
+Client Authenticate:
+|Signature: 256 bytes, raw|
+|Username: variable, UTF-8|
+
+The tag for the message is PACKETS["CLIENT_AUTHENTICATE"]
+
+The maximum allowed username size is selected to be 255 characters (a later message type will use a 1-byte field to denote the size)
+
+The server verifies the signature using RSA2048, Sha256 hashing, and PKCS1v1.5 padding (in the hazmat library as PKCS1v15). If it is not valid, it closes the connection. If it is valid, it continues the handshake.
+
+The server does not need to explicitly acknowledge the Client Authenticate message. It will close the connection if the message is invalid and will consider further messages to be destined for a recipient otherwise.
+
+The handshake is complete. Messages destined for a single client use the tag PACKETS["SERVER_ENVELOPE"] and the unecrypted format is as follows:
+
+|Username Size     : 1 byte,   unsigned integer, big-endian|
+|Username          : variable, UTF-8                       |
+|Wrapped Message   : variable, raw                         |
+
+Since the maximum size for the above is 2^32-28 (see the section on the encryption used to encrypt the above), and since the username can take up to 255 bytes, The maximum allowed message size is 2^32-284 bytes.
+
+When the message is going from client to server, the username is the recipient. When the message is going from server to client, the username is the sender.
+
+The existing chat code does not acknowledge whether a message is received, and a sender would care about acknowledgement from the peer instead of from the server, so there is no SERVER_ACKNOWLEDGE or similar message type.
+
+Messages from a client destined for all peers use the tag PACKETS["SEND_BROADCAST"] and the unencrypted format is the message verbatim
+
+Messages destined for all clients use the tag PACKETS["DISTRIBUTE_BROADCAST"] and the unencrypted format is as follows:
+
+|Sender Username Size: 1 byte,   unsigned integer, big-endian|
+|Sender Username     : variable, UTF-8                       |
+|Wrapped Message     : variable, raw                         |
+
+A client or server can reply with a message tagged PACKETS["NO_SERVER_CONNECTION"] if it receives a server envelope when there is no connection with which to decrypt the envelope. The message should not have a body.

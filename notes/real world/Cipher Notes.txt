@@ -1,0 +1,13 @@
+The specification instructs us to make the messages confidential, but doesn't say anything regarding message integrity. The typical cipher does not provide integrity -- futzing with the ciphertext will often produce valid ciphertext which will be decrypted. This can be utilized in timing attacks to create a scheme for reliably producing desirable changes in the plaintext -- despite not knowing the key or plaintext. Those same timing attacks can also be used to perform actual decryption.
+
+Nearly every scenario which warrants confidentiality also warrants integrity. Meeting these requirements together for a single message or stream is accomplished using an authenticated-encryption scheme. I've linked an article at the bottom discussing the need for authenticated encryption and how to accomplish it. It focuses on combining confidentiality solutions with integrity solutions to form solutions for both (and how improperly combining them can defeat those original solutions).
+
+Currently, In the allowed libraries, the best solution is ChaCha20-Poly1305, which has confidentiality, integrity, and high performance. It also looks like it's the best solution in general, right now. In the hazmat libraries, it is cryptography.hazmat.primitives.ciphers.aead.ChaCha20Poly1305
+
+ChaCha20-Poly1305 is a stream cipher. The abstract ChaCha algorithm can be used for arbitrarily-long messages, but the recommended length for one of its internal pieces limits it to 256GB. The library we are using is further limited to 4GB. For text messages, this shouldn't matter If someone's sending 4GB text messages, they're probably not legitimate, so I won't feel bad about them receiving a server error.
+
+ChaCha20-Poly1305 requires unique nonces. They do not need to be random, so a counter is better than random selection (no chance of collision until the counter rolls over). The recommended nonce size (96 bits/12 bytes), which is also the only size allowed by this library, is large enough that one machine cannot possibly encrypt enough messages to run out of nonces before the heat death of the universe. A global counter will be fine.
+
+ChaCha20-Poly1305 allows you to process a single message with a confidential portion and non-confidential portion such that only the confidential portion is encrypted, but the whole message will have integrity guarantees. I can't think of many scenarios where this is especially useful, but it's a feature that exists. In the library we're using, the non-confidential data does not contribute to the 4GB limit from before, but does have its own 4GB limit.
+
+Article on authenticated encryption: https://paragonie.com/blog/2015/05/using-encryption-and-authentication-correctly

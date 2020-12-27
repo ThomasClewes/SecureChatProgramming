@@ -1,0 +1,61 @@
+I recommend a filter-based architecture in order to easily compose the nested handshakes, routing, parsing, and other transformations.
+
+In a filter-based architecture, you have a two data connections with filters between them. These filters mediate the communications. They can transform, consume, and produce messages. For example, a filter for the client's end of the server handshake will produce the ClientHello and ClientAuthenticate messages and consume the ServerHello and ServerAccept messages. Once the handshake is complete, the filter will use the negotiated keys to encrypt messages from "earlier" in the chain to forward them to the server, and it will use the keys to decrypt messages from the server to send them back to those "earlier" filters. It would also tag incoming messages with the sender so that "later" filters know who it's from.
+
+I'll use the convention that the internet is the "start" of the chain on the server and for received messages on the client, and the "end" for sent messages.
+
+The server needs to set up a new filter chain for each new connection -- different connections will be in different states of the handshakes. The server has one place where it detects new data, and it selects which chain to send data based on which socket received data. This kind of routing is typically referred to as a demultiplexer. The number of directions this socket-demultiplexer can send data will vary -- a new direction is created when a new connection appears, and a direction is destroyed when a connection closes. In this scenario, it is conventional for the demultiplexer to be given a callback which builds a filter chain whenever needed.
+
+The chains all go to the server's message-router. The router checks who the recipient is and selects a filter chain to send the message "back" on.
+
+I'll try my best to diagram the stages of the server's processing. Each block besides the demultiplexer and router would be filters. One of the goals of the "filter" architecture is the ability to add forgotten or additional steps without much effort.
+
+"Serde" stands for "serialize/deserialize". The recipient-serde parses the message to separate the recipient of incoming messages and discard the recipient of outgoing messages (it's already on track for the correct recipient).
+
+The server handshake sends both envelopes (destined for one recipient) and broadcasts (destined for all recipients) to the router.
+
+            +------+    +----------------+    +------+
+            |      |<==>|Server Handshake|<==>|      |
+            |      |    +----------------+    |      |
+            | LNP  |    +----------------+    |      |
+Internet<==>|Demux |<==>|Server Handshake|<==>|Router|
+            |      |    +----------------+    |      |
+            |      |    +----------------+    |      |
+            |      |<==>|Server Handshake|<==>|      |
+            +------+    +----------------+    +------+
+
+The diagram for the client is very similar. One of the key differences is that it has one client-handshake up front and has recipient-handshakes after demultiplexing. It also needs to handle sent messages differently from received messages, and filters become one-way after the recipient-handshakes.
+
+We can also depict some elements of the UI in this diagram style. The incoming messages are all combined into one stream and sent to stdout. There doesn't seem to be a common name for this kind of element -- only a common name for what it does: "join"
+                +-----------------------------------------------------+
+                |                                                     |
+                |                                                    \|/
+                |                    +---------+   +---------+   +--------+
+                |                    |         |<=>|Recipient|-->|        |
+                |                    |         |   |Handshake|   |        |
+                |        +-------+   |         |   +---------+   |        |
+           +---------+   |       |   | Receive |   +---------+   |implicit|
+Internet<=>|Client   |<=>|       |<=>|handshake|<=>|Recipient|-->|  Join  |-->stdout
+           |Handshake|   |       |   |  Demux  |   |Handshake|   |        |
+           +---------+   |       |   |         |   +---------+   |        |
+               /|\       | send/ |   |         |   +---------+   |        |
+                |        |receive|   |         |<=>|Recipient|-->|        |
+                |        | demux |   |         |   |Handshake|   |        |
+                |        |       |   +---------+   +---------+   +--------+
+                |        |       |
+                |        |       |   +---------+   +---------+   +--------+
+                |        |       |   |         |<=>| Sender  |<--|        |
+                |        |       |   |         |   |Handshake|   |        |
+                |        |       |   |         |   +---------+   |        |
+                |        |       |   |  Send   |   +---------+   |        |   +---------+
+                |        |       |<=>|Handshake|<=>| Sender  |<--|  Send  |<--|Recipient|<--stdin
+                |        |       |   |  Demux  |   |handshake|   | Demux  |   | Parse   |
+                |        +-------+   |         |   +---------+   |        |   +---------+
+                |                    |         |   +---------+   |        |        |
+                |                    |         |<=>| Sender  |<--|        |        |
+                |                    |         |   |Handshake|   |        |        |
+                |                    +---------+   +---------+   +--------+        |
+                |                                                                  |
+                +------------------------------------------------------------------+
+
+This highlights a need for the peer-handshake messages which wasn't present for the server: the client needs to distinguish between messages for which it is the message-recipient in the handshake and messages for which it is the message-ender in the handshake. This means that a tag is required on the handshake messages -- order of receipt is not enough.

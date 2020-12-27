@@ -1,0 +1,45 @@
+Note: PACKET refers to the variable in protocol.py. It provides labels for messages since the client needs to distinguish between packets which are part of a handshake it started versus packets which are part of a handshake started by a peer.
+
+Note: size fields give sizes in bytes
+
+In the server handshake, the packet types were a side-channel so that LNP could recognize them. These messages are all inside of server envelopes and need to implement their own tagging.
+
+They do not need length tags since the envelopes are self-terminating
+
+They need type tags since a client needs to distinguish between messages that are a part of a handshake it started versus a handshake which was started by a peer.
+
+Sender generates random number, ephemeral private key, and ephemeral public key.
+
+Sender Hello:
+|PACKETS["SENDER_HELLO"]: 1 byte           |
+|Ephemeral Public Key   : 32 bytes, Raw/Raw|
+|Sender Random Number   : 16 bytes, raw    |
+
+Recipient generates its random number, ephemeral private key, and ephemeral public key, then derives the premaster key using X25519. The 64-byte (not bit) master key is derived using HKDF with SHA256 on the premaster key, with the sender random number concatenated with the recipient random number as the salt. The sender session key is the first 32 bytes of the master key, and the recipient session key is the last 32 bytes.
+
+Recipient Hello:
+|PACKETS["RECIPIENT_HELLO"]: 1 byte,    raw|
+|Ephemeral Public Key      : 32 bytes,  raw|
+|Recipient Random Number   : 16 bytes,  raw|
+
+Note: There is no way for the clients to authenticate themselves to each-other. Because of this, there are no signatures.
+
+The sender also derives the keys in the same manner as the recipient.
+
+The handshake is complete. Messages are sent in an envelope with the following format:
+
+|PACKETS["PEER_ENVELOPE"]   : 1 byte,   raw|
+|Nonce                      : 12 bytes, raw|
+|Ciphertext                 : Variable, raw|
+
+An explicit ciphertext size is not needed since these messages are contained within server envelopes, which will have knowable size.
+
+The maximum allowed ciphertext size is 2^16-287 bytes. Due to the encryption type used, this corresponds to a maximum plaintext length of 2^16-303 bytes.
+
+The plaintext is the message with utf-8 encoding.
+
+The existing chat code does not acknowledge whether a message is received, so there is no PEER_ACKNOWLEDGE or similar message type.
+
+A peer connection can be closed using a message with the tag PACKETS["CLOSE_PEER_CONNECTION"]. The message should not have a body.
+
+A peer can reply with a message tagged PACKETS["NO_PEER_CONNECTION"] if it receives a peer envelope when there is no connection with which to decrypt the envelope. The message should not have a body.
